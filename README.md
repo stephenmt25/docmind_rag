@@ -1,45 +1,151 @@
-# 🧠 DocMind: Full-Stack RAG Application
+# 🧠 DocMind — Full‑Stack Retrieval‑Augmented Generation (RAG)
 
-DocMind is a Retrieval-Augmented Generation (RAG) application that allows users to upload documents (PDF/TXT) and chat with them using AI. It provides precise answers backed by specific source chunks extracted from the uploaded files.
+DocMind lets you upload documents (PDF/TXT), create searchable vector embeddings, and chat with your documents using Google Gemini (GenAI). Answers are produced by a RAG pipeline and include the source chunks used to reason the response.
 
-## 🚀 Features
+## Features
 
-* **Document Ingestion:** Upload PDF and TXT files. The system automatically extracts text, chunks it, and generates vector embeddings.
-* **Intelligent Q&A:** Ask conversational questions about your documents using Google's Gemini LLM.
-* **Transparent Sourcing:** Every AI answer includes expandable source citations, showing the exact document chunk and similarity score used to generate the response.
-* **Document Management:** View uploaded documents, check their chunk counts, and easily delete them from the database.
+- Document ingestion: extract text from PDF/TXT, chunk, embed, and store vectors.
+- Conversational Q&A: ask questions; the system retrieves top chunks and generates grounded answers.
+- Transparent sources: UI returns source chunks and similarity scores for each answer.
+- Document management: list uploaded documents and delete documents (removes all chunks).
+- Graph-based orchestration: LangGraph/DDGS-driven workflow with grounding checks and web-search fallback.
 
-## 🛠️ Tech Stack
+## Architecture & Tech Stack
 
-**Backend:**
-* [FastAPI](https://fastapi.tiangolo.com/) - High-performance Python web framework
-* [LangChain](https://python.langchain.com/) (v0.3) & [LangGraph](https://langchain-ai.github.io/langgraph/) - LLM orchestration and agent workflows
-* [Google GenAI](https://ai.google.dev/) - Embeddings and LLM (Gemini)
-* [Psycopg 3](https://www.psycopg.org/psycopg3/) - PostgreSQL database driver and connection pooling
+- Backend: FastAPI (Python) exposing REST endpoints. Business logic in `backend/services.py` and graph orchestration in `backend/graph.py`.
+- Models & LLMs: Google GenAI / Gemini used for embeddings and generation (`genai` client).
+- Database: PostgreSQL (Supabase suggested) with vector column for embeddings; connection pooling via `psycopg_pool`.
+- Frontend: React + TypeScript + Vite. Communicates with backend REST API.
+- Utilities: small CLI scripts available in the project root (`ingest.py`, `query.py`, `list_models.py`).
 
-**Frontend:**
-* [React](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) - UI framework
-* [Vite](https://vitejs.dev/) - Blazing fast frontend build tool
-* [Axios](https://axios-http.com/) - HTTP client
+## Repo layout (important files)
 
-**Database:**
-* [Supabase](https://supabase.com/) (PostgreSQL) - Vector storage for document embeddings
+- `backend/main.py` — FastAPI app and HTTP endpoints.
+- `backend/services.py` — RAG business logic (ingest, retrieve, generate, grounding checks).
+- `backend/database.py` — DB connection pool and helper functions.
+- `backend/models.py` — Pydantic request/response models used by the API.
+- `backend/graph.py` — LangGraph workflow that composes retrieval, generation and fallback logic.
+- `ingest.py` — CLI-style script to ingest a local file directly (standalone).
+- `query.py` — Simple CLI conversational query runner (embeds, retrieves, generates).
+- `list_models.py` — Lists available Gemini models for your API key.
+- `frontend/` — React + TypeScript UI (dev server via `npm run dev`).
 
----
+## Environment variables
 
-## 📋 Prerequisites
+Create a `.env` with at least these variables (used by backend and scripts):
 
-Before you begin, ensure you have the following installed:
-* **Python 3.10+**
-* **Node.js 18+** & **npm**
-* A **Supabase** account with a PostgreSQL database configured
-* A **Google Gemini API Key**
+- `GEMINI_API_KEY` — API key for Google GenAI / Gemini.
+- `DATABASE_URL` — Full PostgreSQL connection string (Supabase or other).
 
----
+Optional (local dev):
 
-## ⚙️ Installation & Setup
+- `PORT` — backend port (default 8000)
 
-### 1. Clone the Repository
+## Database schema
+
+This project expects a single table to store document chunks:
+
+- Table: `documents`
+  - `filename` (text)
+  - `chunk_index` (int)
+  - `content` (text)
+  - `embedding` (vector/pgvector or Supabase vector type)
+
+Adjust the column type for `embedding` to match your DB provider (e.g., `vector` for pgvector).
+
+## API Endpoints
+
+- `GET /` — health check
+- `POST /api/documents/upload` — upload and ingest a PDF or TXT file (multipart form `file`).
+  - Response: `{ filename, chunk_count, message }`
+- `GET /api/documents` — list uploaded documents with `chunk_count`.
+- `DELETE /api/documents/{filename}` — delete all chunks for a file.
+- `POST /api/chat` — chat endpoint. Request body (JSON):
+
+  {
+    "question": "...",
+    "chat_history": [{ "role": "user|assistant", "content": "..." }, ...]
+  }
+
+  Response: `{ question, answer, sources, trace }` where `sources` contains filename, chunk_index, content, similarity.
+
+## CLI utilities
+
+- `python ingest.py <path_to_file> [chunk_size]` — ingest a local file directly (uses Gemini embeddings + DB).
+- `python query.py` — interactive CLI to ask questions using stored documents.
+- `python list_models.py` — prints available Gemini models for your API key.
+
+## Rate limiting & model choices
+
+- Embeddings use `models/gemini-embedding-001`.
+- Generation uses preview models in code (e.g. `models/gemini-3-flash-preview`); update as needed.
+- The ingest pipeline pauses 35 seconds every 50 chunk embeddings to avoid hitting API rate limits — you may tune this.
+
+## Local development & run
+
+Backend (from `docmind` root):
+
 ```bash
-git clone [https://github.com/YOUR_USERNAME/docmind-rag.git](https://github.com/YOUR_USERNAME/docmind-rag.git)
-cd docmind-rag
+cd backend
+python -m venv .venv
+.venv\Scripts\activate    # Windows
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Or build frontend and serve static files from `backend/static` for production.
+
+## Example usage (curl)
+
+Upload a document:
+
+```bash
+curl -F "file=@/path/to/doc.pdf" http://localhost:8000/api/documents/upload
+```
+
+Chat with documents:
+
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What is the main idea?","chat_history":[]}'
+```
+
+List documents:
+
+```bash
+curl http://localhost:8000/api/documents
+```
+
+Delete a document:
+
+```bash
+curl -X DELETE http://localhost:8000/api/documents/yourfile.pdf
+```
+
+## Troubleshooting
+
+- `GEMINI_API_KEY` errors: verify API key and network access.
+- Database errors: confirm `DATABASE_URL` and that the `documents` table exists with correct `embedding` type.
+- Rate limits: if embedding/generation fails, increase the pause in `services.py` or shard ingestion.
+
+## Notes & next steps
+
+- The graph in `backend/graph.py` contains routing logic, web-search fallback, and a grounding check that can be tuned.
+- You can swap Gemini models or add alternative embedding providers by updating `services.py`.
+
+---
+
+If you want, I can also:
+
+- Add example `.env.example` with required variables.
+- Add a small `docker-compose.yml` to run Postgres + backend + frontend locally.
+- Expand the frontend README with usage screenshots and API examples.
