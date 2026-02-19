@@ -5,10 +5,14 @@ These provide type safety and automatic validation at the API boundary.
 from pydantic import BaseModel
 from typing import List, Optional
 
+class Message(BaseModel):
+    role: str
+    content: str
 
 class ChatRequest(BaseModel):
     """Request body for /api/chat endpoint"""
     question: str
+    chat_history: list[Message] = []
 
 
 class SourceChunk(BaseModel):
@@ -24,6 +28,7 @@ class ChatResponse(BaseModel):
     question: str
     answer: str
     sources: List[SourceChunk]
+    trace: list[str] = []
 
 
 class DocumentInfo(BaseModel):

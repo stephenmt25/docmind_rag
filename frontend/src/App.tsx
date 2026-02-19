@@ -72,12 +72,19 @@ function App() {
     setIsLoading(true);
 
     try {
-      const response = await askQuestion(inputValue);
+      // Extract just the role and content of the last 4 messages for context
+      const historyPayload = messages.slice(-4).map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
+      const response = await askQuestion(inputValue, historyPayload);
 
       const assistantMessage: ChatMessage = {
         role: 'assistant',
         content: response.answer,
         sources: response.sources,
+        trace: response.trace,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -157,6 +164,26 @@ function App() {
             ) : (
               messages.map((msg, idx) => (
                 <div key={idx} className={`message ${msg.role}`}>
+                  
+                  {/* --- NEW EXECUTION TRACE BADGES --- */}
+                  {msg.trace && msg.trace.length > 0 && (
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                      {msg.trace.map((step, i) => (
+                        <span key={i} style={{
+                          fontSize: '0.75rem',
+                          background: step.includes('Web') ? '#ff7675' : '#74b9ff',
+                          color: 'white',
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          fontWeight: 'bold'
+                        }}>
+                          {i + 1}. {step}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {/* ---------------------------------- */}
+
                   <div className="message-content">{msg.content}</div>
 
                   {msg.sources && msg.sources.length > 0 && (
@@ -194,7 +221,7 @@ function App() {
             <textarea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress} /* Updated from onKeyPress to onKeyDown to avoid warnings */
               placeholder="Ask a question about your documents..."
               rows={3}
               disabled={isLoading}

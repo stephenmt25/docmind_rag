@@ -73,7 +73,44 @@ def ingest_document(filepath: str, filename: str, chunk_size: int = 512) -> int:
     
     return len(chunks)
 
+def rewrite_query(question: str, chat_history: list[dict]) -> str:
+    """
+    Rewrites a conversational query into a standalone query using the chat history.
+    """
+    if not chat_history:
+        return question
+        
+    history_text = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in chat_history])
+    
+    prompt = f"""You are a Search Optimizer. Given a conversation history and a new question, your ONLY goal is to output 2-3 keywords that represent the SUBJECT being discussed.
+    
+RULES:
+- NO conversational filler (e.g., remove "summarize", "explain", "tell me").
+- NO formatting instructions (e.g., remove "one sentence", "bullet points").
+- Resolve all pronouns (it, they, them) to the actual topic.
 
+Example:
+History: "What are tokens?" "Tokens are subword units."
+Question: "Can you summarize it in one sentence?"
+Output: "tokens definition summary"
+
+History:
+{history_text}
+
+Latest Question: {question}
+
+Output Search Keywords:"""
+    
+    try:
+        response = client.models.generate_content(
+            model="models/gemini-2.5-flash",
+            contents=prompt
+        )
+        return response.text.strip()
+    except Exception as e:
+        print(f"Query rewrite failed: {e}")
+        return question
+    
 def retrieve_chunks(question: str, top_k: int = 5) -> list[dict]:
     """
     Retrieve top_k most similar chunks for a question.
@@ -105,11 +142,19 @@ def retrieve_chunks(question: str, top_k: int = 5) -> list[dict]:
         ]
 
 
-def generate_answer(question: str, chunks: list[dict]) -> str:
+def generate_answer(question: str, chunks: list[dict], chat_history: list[dict] = None) -> str:
     """
     Generate an answer using retrieved chunks as context.
     Returns the answer text.
     """
+    # Format chat history if it exists
+    history_text = ""
+    if chat_history:
+        history_text = "--- PREVIOUS CONVERSATION HISTORY ---\n"
+        for msg in chat_history:
+            history_text += f"{msg['role'].upper()}: {msg['content']}\n"
+        history_text += "-------------------------------------\n\n"
+
     # Build context from chunks
     context = "\n\n---\n\n".join(
         f"Source: {c['filename']}, chunk {c['chunk_index']}\n{c['content']}"
@@ -120,15 +165,15 @@ def generate_answer(question: str, chunks: list[dict]) -> str:
 If the context does not contain enough information to answer, say "I don't have enough information to answer that."
 Do not make anything up.
 
-Context:
+{history_text}Context:
 {context}
 
-Question: {question}
+Current Question: {question}
 
 Answer:"""
     
     response = client.models.generate_content(
-        model="models/gemini-2.5-flash",
+        model="models/gemini-3-flash-preview",
         contents=prompt
     )
     return response.text
@@ -155,3 +200,36 @@ def answer_question(question: str, top_k: int = 5) -> dict:
         "answer": answer,
         "sources": chunks
     }
+
+def check_if_grounded(chunks: list[dict], answer: str) -> bool:
+    """
+    Evaluates if the generated answer is grounded in the provided context.
+    Returns True if grounded, False if hallucinated.
+    """
+    if not chunks:
+        return False
+        
+    context = "\n\n".join([c['content'] for c in chunks])
+    
+    prompt = f"""You are a strict grading assistant. 
+Your job is to check if the ANSWER is entirely supported by the CONTEXT.
+If the ANSWER contains any facts or claims not present in the CONTEXT, you must reject it.
+
+CONTEXT:
+{context}
+
+ANSWER:
+{answer}
+
+Is the answer completely grounded in the context? Reply with exactly YES or NO.
+"""
+    try:
+        response = client.models.generate_content(
+            model="models/gemini-3-flash-preview",
+            contents=prompt
+        )
+        # Check if the model replied with "YES"
+        return "YES" in response.text.strip().upper()
+    except Exception as e:
+        print(f"Grounding check failed: {e}")
+        return False # Fail safe

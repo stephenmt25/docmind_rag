@@ -40,14 +40,14 @@ export async function uploadDocument(file: File): Promise<UploadResponse> {
 /**
  * Ask a question and get an answer with sources
  */
-export async function askQuestion(question: string): Promise<ChatResponse> {
+export async function askQuestion(question: string, chatHistory: {role: string, content: string}[] = []): Promise<ChatResponse> {
   const response = await api.post<ChatResponse>('/api/chat', {
     question,
+    chat_history: chatHistory,
   } as ChatRequest);
 
   return response.data;
 }
-
 /**
  * Get list of all uploaded documents
  */

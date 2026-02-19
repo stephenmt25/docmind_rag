@@ -74,7 +74,7 @@ Answer:"""
 
     print("\nGenerating answer...")
     response = client.models.generate_content(
-        model="models/gemini-2.5-flash",
+        model="models/gemini-3-flash-preview",
         contents=prompt
     )
     return response.text

@@ -14,6 +14,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   sources?: SourceChunk[];
+  trace?: string[];
 }
 
 export interface DocumentInfo {
@@ -23,12 +24,14 @@ export interface DocumentInfo {
 
 export interface ChatRequest {
   question: string;
+  chat_history: { role: string; content: string }[];
 }
 
 export interface ChatResponse {
   question: string;
   answer: string;
   sources: SourceChunk[];
+  trace?: string[];
 }
 
 export interface UploadResponse {

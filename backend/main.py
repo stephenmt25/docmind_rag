@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from models import ChatRequest, ChatResponse, DocumentInfo, UploadResponse
 from database import get_document_list, delete_document
 from services import ingest_document, answer_question
+from graph import rag_app
 
 app = FastAPI(title="DocMind API")
 
@@ -74,29 +75,33 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """
-    Ask a question and get an answer with sources.
-    
-    Steps:
-    1. Embed the question
-    2. Retrieve top-k similar chunks
-    3. Generate answer using chunks as context
-    
-    Returns: question, answer, list of source chunks
-    """
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
     
     try:
-        result = answer_question(request.question)
+        # Convert Pydantic Message objects to dicts for LangGraph
+        history_dicts = [{"role": msg.role, "content": msg.content} for msg in request.chat_history]
+
+        # Prepare the state for LangGraph
+        initial_state = {
+            "question": request.question, 
+            "chat_history": history_dicts, # <-- Pass it here
+            "chunks": [], 
+            "trace": []
+        }   
+        
+        # Execute the graph
+        result = rag_app.invoke(initial_state)
+        
+        # Note: We return result['trace'] to the frontend as well
         return ChatResponse(
             question=result["question"],
             answer=result["answer"],
-            sources=result["sources"]
+            sources=result["chunks"],
+            trace=result.get("trace", [])
         )
-    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate answer: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Graph Execution Error: {str(e)}")
 
 
 @app.get("/api/documents", response_model=list[DocumentInfo])
