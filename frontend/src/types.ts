@@ -1,6 +1,6 @@
 /**
  * TypeScript types for the application.
- * Matches the Pydantic models from the backend.
+ * Mirrors the Pydantic models in backend/models.py.
  */
 
 export interface SourceChunk {
@@ -14,7 +14,15 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   sources?: SourceChunk[];
+  /** Ordered list of pipeline steps the backend graph executed for this answer. */
   trace?: string[];
+  /** True when the message is a client-side error notice rather than a model answer. */
+  isError?: boolean;
+}
+
+export interface HistoryMessage {
+  role: string;
+  content: string;
 }
 
 export interface DocumentInfo {
@@ -24,7 +32,7 @@ export interface DocumentInfo {
 
 export interface ChatRequest {
   question: string;
-  chat_history: { role: string; content: string }[];
+  chat_history: HistoryMessage[];
 }
 
 export interface ChatResponse {

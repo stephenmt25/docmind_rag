@@ -1,16 +1,15 @@
 import os
 from dotenv import load_dotenv
-import psycopg2
+import psycopg
 from google import genai
-from google.genai import types
 
 load_dotenv()
 
 # Configure Gemini with the new package
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-# Connect to Supabase
-conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+# Connect to Postgres (pgvector)
+conn = psycopg.connect(os.getenv("DATABASE_URL"))
 cursor = conn.cursor()
 
 
