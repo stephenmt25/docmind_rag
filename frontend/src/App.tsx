@@ -1,239 +1,128 @@
 /**
- * Main App component.
- * Manages state and coordinates DocumentPanel and ChatPanel.
+ * Root component. Owns application state and coordinates the Sidebar
+ * (document management) and the ChatPanel (conversation).
  */
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import './App.css';
-import type { ChatMessage, DocumentInfo, SourceChunk } from './types';
-import { uploadDocument, askQuestion, getDocuments, deleteDocument } from './api';
+import type { ChatMessage, DocumentInfo } from './types';
+import {
+  askQuestion,
+  deleteDocument,
+  getDocuments,
+  getErrorMessage,
+  uploadDocument,
+} from './api';
+import Sidebar from './components/Sidebar';
+import ChatPanel from './components/ChatPanel';
 
-function App() {
-  // State management
+/** Number of previous messages sent with each question for follow-up context. */
+const HISTORY_WINDOW = 4;
+const TOAST_DURATION_MS = 4500;
+
+interface Toast {
+  kind: 'success' | 'error';
+  text: string;
+}
+
+export default function App() {
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [toast, setToast] = useState<Toast | null>(null);
 
-  // Load documents on mount
-  useEffect(() => {
-    loadDocuments();
+  const refreshDocuments = useCallback(async () => {
+    try {
+      setDocuments(await getDocuments());
+    } catch (error) {
+      setToast({ kind: 'error', text: getErrorMessage(error) });
+    }
   }, []);
 
-  async function loadDocuments() {
-    try {
-      const docs = await getDocuments();
-      setDocuments(docs);
-    } catch (error) {
-      console.error('Failed to load documents:', error);
-    }
-  }
+  useEffect(() => {
+    void refreshDocuments();
+  }, [refreshDocuments]);
 
-  async function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), TOAST_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
+  async function handleUpload(file: File) {
     setIsUploading(true);
     try {
       const result = await uploadDocument(file);
-      alert(`Success! ${result.message}`);
-      await loadDocuments(); // Refresh document list
-    } catch (error: any) {
-      alert(`Upload failed: ${error.response?.data?.detail || error.message}`);
+      setToast({ kind: 'success', text: `Indexed ${result.filename} (${result.chunk_count} chunks)` });
+      await refreshDocuments();
+    } catch (error) {
+      setToast({ kind: 'error', text: `Upload failed: ${getErrorMessage(error)}` });
     } finally {
       setIsUploading(false);
-      // Reset file input
-      event.target.value = '';
     }
   }
 
-  async function handleDeleteDocument(filename: string) {
-    if (!window.confirm(`Delete ${filename}?`)) return;
-
+  async function handleDelete(filename: string) {
     try {
       await deleteDocument(filename);
-      await loadDocuments();
-      alert(`Deleted ${filename}`);
-    } catch (error: any) {
-      alert(`Delete failed: ${error.response?.data?.detail || error.message}`);
+      setToast({ kind: 'success', text: `Deleted ${filename}` });
+      await refreshDocuments();
+    } catch (error) {
+      setToast({ kind: 'error', text: `Delete failed: ${getErrorMessage(error)}` });
     }
   }
 
-  async function handleSendMessage() {
-    if (!inputValue.trim() || isLoading) return;
+  async function handleSend(question: string) {
+    const history = messages
+      .filter((m) => !m.isError)
+      .slice(-HISTORY_WINDOW)
+      .map(({ role, content }) => ({ role, content }));
 
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: inputValue,
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInputValue('');
+    setMessages((prev) => [...prev, { role: 'user', content: question }]);
     setIsLoading(true);
 
     try {
-      // Extract just the role and content of the last 4 messages for context
-      const historyPayload = messages.slice(-4).map(m => ({
-        role: m.role,
-        content: m.content
-      }));
-
-      const response = await askQuestion(inputValue, historyPayload);
-
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: response.answer,
-        sources: response.sources,
-        trace: response.trace,
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch (error: any) {
-      const errorMessage: ChatMessage = {
-        role: 'assistant',
-        content: `Error: ${error.response?.data?.detail || error.message}`,
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      const response = await askQuestion(question, history);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: response.answer,
+          sources: response.sources,
+          trace: response.trace,
+        },
+      ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: getErrorMessage(error), isError: true },
+      ]);
     } finally {
       setIsLoading(false);
     }
   }
 
-  function handleKeyPress(event: React.KeyboardEvent) {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      handleSendMessage();
-    }
-  }
-
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>DocMind</h1>
-        <p>Chat with your documents using AI</p>
-      </header>
+    <div className="app">
+      <Sidebar
+        documents={documents}
+        isUploading={isUploading}
+        onUpload={handleUpload}
+        onDelete={handleDelete}
+      />
+      <ChatPanel
+        messages={messages}
+        isLoading={isLoading}
+        hasDocuments={documents.length > 0}
+        onSend={handleSend}
+        onNewChat={() => setMessages([])}
+      />
 
-      <div className="container">
-        {/* Document Panel */}
-        <div className="document-panel">
-          <h2>Documents</h2>
-
-          <div className="upload-section">
-            <label htmlFor="file-upload" className="upload-button">
-              {isUploading ? 'Uploading...' : 'Upload Document'}
-            </label>
-            <input
-              id="file-upload"
-              type="file"
-              accept=".pdf,.txt"
-              onChange={handleFileUpload}
-              disabled={isUploading}
-              style={{ display: 'none' }}
-            />
-          </div>
-
-          <div className="document-list">
-            {documents.length === 0 ? (
-              <p className="empty-state">No documents uploaded yet</p>
-            ) : (
-              documents.map((doc) => (
-                <div key={doc.filename} className="document-item">
-                  <div className="document-info">
-                    <strong>{doc.filename}</strong>
-                    <span className="chunk-count">{doc.chunk_count} chunks</span>
-                  </div>
-                  <button
-                    onClick={() => handleDeleteDocument(doc.filename)}
-                    className="delete-button"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
+      {toast && (
+        <div className={`toast toast-${toast.kind}`} role="status">
+          {toast.text}
         </div>
-
-        {/* Chat Panel */}
-        <div className="chat-panel">
-          <div className="messages">
-            {messages.length === 0 ? (
-              <div className="empty-state">
-                <p>Upload a document and start asking questions!</p>
-              </div>
-            ) : (
-              messages.map((msg, idx) => (
-                <div key={idx} className={`message ${msg.role}`}>
-                  
-                  {/* --- NEW EXECUTION TRACE BADGES --- */}
-                  {msg.trace && msg.trace.length > 0 && (
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                      {msg.trace.map((step, i) => (
-                        <span key={i} style={{
-                          fontSize: '0.75rem',
-                          background: step.includes('Web') ? '#ff7675' : '#74b9ff',
-                          color: 'white',
-                          padding: '2px 8px',
-                          borderRadius: '12px',
-                          fontWeight: 'bold'
-                        }}>
-                          {i + 1}. {step}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {/* ---------------------------------- */}
-
-                  <div className="message-content">{msg.content}</div>
-
-                  {msg.sources && msg.sources.length > 0 && (
-                    <details className="sources">
-                      <summary>Sources ({msg.sources.length})</summary>
-                      <div className="source-list">
-                        {msg.sources.map((source, i) => (
-                          <div key={i} className="source-item">
-                            <strong>
-                              {source.filename} (chunk {source.chunk_index})
-                            </strong>
-                            <span className="similarity">
-                              similarity: {source.similarity.toFixed(3)}
-                            </span>
-                            <p className="source-content">
-                              {source.content.substring(0, 150)}...
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  )}
-                </div>
-              ))
-            )}
-
-            {isLoading && (
-              <div className="message assistant">
-                <div className="message-content">Thinking...</div>
-              </div>
-            )}
-          </div>
-
-          <div className="input-area">
-            <textarea
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyPress} /* Updated from onKeyPress to onKeyDown to avoid warnings */
-              placeholder="Ask a question about your documents..."
-              rows={3}
-              disabled={isLoading}
-            />
-            <button onClick={handleSendMessage} disabled={isLoading || !inputValue.trim()}>
-              Send
-            </button>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
-
-export default App;

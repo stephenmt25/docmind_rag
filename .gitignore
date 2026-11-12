@@ -1,5 +1,6 @@
 # Environments
 .env
+.venv/
 venv/
 env/
 
@@ -12,6 +13,9 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 .DS_Store
+
+# Production build of the UI served by FastAPI
+backend/static/
 
 # Logs and temp files
 *.log

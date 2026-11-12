@@ -1,0 +1,24 @@
+# Local Postgres with pgvector for development.
+#   docker compose up -d
+# The schema in schema.sql is applied automatically on first start.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: docmind-db
+    environment:
+      POSTGRES_USER: docmind
+      POSTGRES_PASSWORD: docmind
+      POSTGRES_DB: docmind
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - docmind-pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docmind -d docmind"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  docmind-pgdata:

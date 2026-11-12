@@ -9,4 +9,4 @@ langchain-text-splitters>=0.3.3
 pypdf==5.1.0
 python-multipart==0.0.20
 langgraph>=0.2.0
-ddgs==2.0.0
+ddgs>=9.0.0
